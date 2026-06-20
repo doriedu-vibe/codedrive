@@ -44,7 +44,7 @@
             width: 200px;
         }
 
-        #nextCanvas {
+        #nextCanvas, #holdCanvas {
             background-color: #222;
             border: 2px solid #444;
             display: block;
@@ -154,21 +154,30 @@
                 <canvas id="nextCanvas" width="120" height="120"></canvas>
             </div>
 
+            <div>
+                <h3 class="text-xs text-gray-400 mb-2">HOLD</h3>
+                <canvas id="holdCanvas" width="120" height="120"></canvas>
+            </div>
+
             <div id="controls-info" class="text-[10px] text-gray-500 leading-loose mt-4">
                 [조작법]<br>
                 ← → : 이동<br>
                 ↑ : 회전<br>
-                ↓ : 내리기
+                ↓ : 내리기<br>
+                Space : 한 번에 내리기<br>
+                C : 블록 보관(Hold)
             </div>
         </div>
     </div>
 
     <!-- 모바일 온스크린 버튼 -->
     <div class="mobile-controls">
-        <button onclick="playerMove(-1)">←</button>
+        <button onclick="playerHold()" style="font-size:14px;">HOLD</button>
         <button onclick="playerRotate()">↻</button>
+        <button onclick="playerHardDrop()">⤓</button>
+        <button onclick="playerMove(-1)">←</button>
+        <button onclick="playerDrop()">↓</button>
         <button onclick="playerMove(1)">→</button>
-        <button class="col-start-2" onclick="playerDrop()">↓</button>
     </div>
 
 <script>
@@ -177,6 +186,9 @@
     
     const nextCanvas = document.getElementById('nextCanvas');
     const nextCtx = nextCanvas.getContext('2d');
+
+    const holdCanvas = document.getElementById('holdCanvas');
+    const holdCtx = holdCanvas.getContext('2d');
 
     const scoreElement = document.getElementById('score');
     const gameOverScreen = document.getElementById('gameOverScreen');
@@ -221,6 +233,12 @@
         matrix: null,
         shapeIndex: 0
     };
+    
+    let holdPiece = {
+        matrix: null,
+        shapeIndex: 0
+    };
+    let canHold = true;
     
     let score = 0;
     let dropCounter = 0;
@@ -274,9 +292,24 @@
             ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(canvas.width, j); ctx.stroke();
         }
 
-        // 쌓인 블록 및 현재 블록 그리기
+        // 쌓인 블록 그리기
         drawMatrix(board, { x: 0, y: 0 }, ctx);
-        drawMatrix(player.matrix, player.pos, ctx);
+
+        if (player.matrix) {
+            // 예상 모형 (Ghost Piece) 계산 및 그리기
+            const ghostPos = { x: player.pos.x, y: player.pos.y };
+            while (!collide(board, { matrix: player.matrix, pos: ghostPos })) {
+                ghostPos.y++;
+            }
+            ghostPos.y--; // 충돌하기 직전 위치
+            
+            ctx.globalAlpha = 0.2; // 반투명 설정
+            drawMatrix(player.matrix, ghostPos, ctx);
+            ctx.globalAlpha = 1.0; // 투명도 복구
+
+            // 현재 플레이어 블록 그리기
+            drawMatrix(player.matrix, player.pos, ctx);
+        }
     }
 
     // 다음 블록 미리보기 그리기
@@ -289,6 +322,18 @@
         const offsetY = (4 - nextPiece.matrix.length) / 2;
         
         drawMatrix(nextPiece.matrix, { x: offsetX, y: offsetY }, nextCtx, 30);
+    }
+
+    // 보관된 블록(Hold) 그리기
+    function drawHold() {
+        holdCtx.fillStyle = '#222';
+        holdCtx.fillRect(0, 0, holdCanvas.width, holdCanvas.height);
+        
+        if (holdPiece.shapeIndex !== 0) {
+            const offsetX = (4 - holdPiece.matrix[0].length) / 2;
+            const offsetY = (4 - holdPiece.matrix.length) / 2;
+            drawMatrix(holdPiece.matrix, { x: offsetX, y: offsetY }, holdCtx, 30);
+        }
     }
 
     // 블록 보드에 고정하기
@@ -377,6 +422,48 @@
             gameOverScreen.style.display = 'flex';
             finalScoreElement.innerText = score;
         }
+
+        canHold = true; // 새로운 블록이 나타나면 Hold 기능 활성화
+    }
+
+    // 블록 보관 (Hold) 처리
+    function playerHold() {
+        if (isGameOver || !canHold) return;
+        
+        if (holdPiece.shapeIndex === 0) {
+            // 처음 보관할 때
+            holdPiece.shapeIndex = player.shapeIndex;
+            holdPiece.matrix = createPiece(player.shapeIndex);
+            playerReset();
+        } else {
+            // 이미 보관된 블록이 있을 때 (서로 교체)
+            const tempIndex = player.shapeIndex;
+            player.shapeIndex = holdPiece.shapeIndex;
+            player.matrix = createPiece(holdPiece.shapeIndex);
+            
+            holdPiece.shapeIndex = tempIndex;
+            holdPiece.matrix = createPiece(tempIndex);
+            
+            // 위치 초기화
+            player.pos.y = 0;
+            player.pos.x = Math.floor(COLS / 2) - Math.floor(player.matrix[0].length / 2);
+        }
+        
+        canHold = false; // 한 번 내리기 전까지 다시 보관 불가
+        drawHold();
+    }
+
+    // 블록 한 번에 내리기 (Hard Drop)
+    function playerHardDrop() {
+        if(isGameOver) return;
+        while (!collide(board, player)) {
+            player.pos.y++;
+        }
+        player.pos.y--; // 바닥이나 다른 블록에 닿기 직전 위치로
+        merge(board, player);
+        playerReset();
+        playerSweep();
+        dropCounter = 0;
     }
 
     // 블록 아래로 떨어뜨리기
@@ -461,6 +548,10 @@
         gameOverScreen.style.display = 'none';
         isGameOver = false;
         
+        holdPiece = { matrix: null, shapeIndex: 0 };
+        canHold = true;
+        drawHold();
+        
         nextPiece.shapeIndex = 0; // 리셋 트리거
         playerReset();
         
@@ -488,6 +579,14 @@
                 break;
             case 38: // Up Arrow
                 playerRotate();
+                event.preventDefault();
+                break;
+            case 32: // Spacebar
+                playerHardDrop();
+                event.preventDefault();
+                break;
+            case 67: // 'C' key
+                playerHold();
                 event.preventDefault();
                 break;
         }
