@@ -56,8 +56,8 @@
             text-shadow: 0 0 5px #0ff;
         }
 
-        /* 게임 오버 오버레이 */
-        #gameOverScreen {
+        /* 게임 오버, 시작, 일시정지 오버레이 */
+        #gameOverScreen, #startScreen, #pauseScreen {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.85);
@@ -65,8 +65,11 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            display: none;
             z-index: 10;
+        }
+
+        #gameOverScreen, #pauseScreen {
+            display: none;
         }
 
         .canvas-wrapper {
@@ -132,6 +135,22 @@
         <div class="canvas-wrapper">
             <canvas id="gameBoard" width="300" height="600"></canvas>
             
+            <!-- 시작 UI -->
+            <div id="startScreen">
+                <h2 class="text-neon text-2xl mb-6 text-center">TETRIS</h2>
+                <button onclick="startGame()" class="px-4 py-2 bg-white text-black hover:bg-gray-300 border-2 border-white cursor-pointer text-xs transition-colors">
+                    게임 시작
+                </button>
+            </div>
+
+            <!-- 일시정지 UI -->
+            <div id="pauseScreen">
+                <h2 class="text-yellow-400 text-2xl mb-6 text-center">PAUSED</h2>
+                <button onclick="togglePause()" class="px-4 py-2 bg-white text-black hover:bg-gray-300 border-2 border-white cursor-pointer text-xs transition-colors">
+                    계속 하기
+                </button>
+            </div>
+
             <!-- 게임 오버 UI -->
             <div id="gameOverScreen">
                 <h2 class="text-red-500 text-2xl mb-4 text-center">GAME OVER</h2>
@@ -165,8 +184,13 @@
                 ↑ : 회전<br>
                 ↓ : 내리기<br>
                 Space : 한 번에 내리기<br>
-                C : 블록 보관(Hold)
+                C : 블록 보관(Hold)<br>
+                P / ESC : 일시정지
             </div>
+            
+            <button onclick="togglePause()" class="mt-2 w-full px-4 py-2 bg-gray-800 text-white hover:bg-gray-700 border-2 border-gray-600 cursor-pointer text-xs transition-colors rounded">
+                일시정지
+            </button>
         </div>
     </div>
 
@@ -193,6 +217,8 @@
     const scoreElement = document.getElementById('score');
     const gameOverScreen = document.getElementById('gameOverScreen');
     const finalScoreElement = document.getElementById('finalScore');
+    const startScreen = document.getElementById('startScreen');
+    const pauseScreen = document.getElementById('pauseScreen');
 
     // 게임 설정 상수
     const COLS = 10;
@@ -246,6 +272,8 @@
     let lastTime = 0;
     let animationId = null;
     let isGameOver = false;
+    let isPlaying = false;
+    let isPaused = false;
 
     // 보드 초기화 (0으로 채워진 20x10 배열 생성)
     function createMatrix(w, h) {
@@ -317,11 +345,13 @@
         nextCtx.fillStyle = '#222';
         nextCtx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
         
-        // 미리보기 캔버스 중앙 정렬을 위한 오프셋 계산
-        const offsetX = (4 - nextPiece.matrix[0].length) / 2;
-        const offsetY = (4 - nextPiece.matrix.length) / 2;
-        
-        drawMatrix(nextPiece.matrix, { x: offsetX, y: offsetY }, nextCtx, 30);
+        if (nextPiece.matrix) {
+            // 미리보기 캔버스 중앙 정렬을 위한 오프셋 계산
+            const offsetX = (4 - nextPiece.matrix[0].length) / 2;
+            const offsetY = (4 - nextPiece.matrix.length) / 2;
+            
+            drawMatrix(nextPiece.matrix, { x: offsetX, y: offsetY }, nextCtx, 30);
+        }
     }
 
     // 보관된 블록(Hold) 그리기
@@ -524,7 +554,7 @@
 
     // 게임 루프 업데이트
     function update(time = 0) {
-        if(isGameOver) return;
+        if(isGameOver || !isPlaying || isPaused) return;
 
         const deltaTime = time - lastTime;
         lastTime = time;
@@ -539,14 +569,34 @@
         animationId = requestAnimationFrame(update);
     }
 
+    // 일시정지 토글
+    function togglePause() {
+        if (!isPlaying || isGameOver) return;
+        
+        isPaused = !isPaused;
+        
+        if (isPaused) {
+            pauseScreen.style.display = 'flex';
+            if (animationId) cancelAnimationFrame(animationId);
+        } else {
+            pauseScreen.style.display = 'none';
+            lastTime = performance.now(); // 시간 누적 방지
+            update();
+        }
+    }
+
     // 게임 시작 초기화
     function startGame() {
         board = createMatrix(COLS, ROWS);
         score = 0;
         dropInterval = 1000;
         scoreElement.innerText = score;
+        startScreen.style.display = 'none';
         gameOverScreen.style.display = 'none';
+        pauseScreen.style.display = 'none';
         isGameOver = false;
+        isPlaying = true;
+        isPaused = false;
         
         holdPiece = { matrix: null, shapeIndex: 0 };
         canHold = true;
@@ -560,9 +610,24 @@
         update();
     }
 
+    // 게임 초기 화면 구성 (루프 실행 안함)
+    function init() {
+        board = createMatrix(COLS, ROWS);
+        draw();
+        drawNext();
+        drawHold();
+    }
+
     // 키보드 이벤트 리스너 등록
     document.addEventListener('keydown', event => {
-        if(isGameOver) return;
+        // 일시정지 단축키 (P 또는 ESC)
+        if (event.keyCode === 80 || event.keyCode === 27) {
+            togglePause();
+            event.preventDefault();
+            return;
+        }
+
+        if(isGameOver || !isPlaying || isPaused) return;
         
         switch (event.keyCode) {
             case 37: // Left Arrow
@@ -592,8 +657,8 @@
         }
     });
 
-    // 게임 최초 실행
-    startGame();
+    // 초기 화면 그리기
+    init();
 
 </script>
 </body>
